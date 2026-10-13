@@ -29,41 +29,132 @@ SECURITY_HEADERS = [
 
 
 def build_url(host, path):
-     if host.startswith("https://") and not host.startswith("http://"):
-        host = f"https://{host}" 
-        host = host.rstrip("/")
-        path = path.lstrip("/")
- return f"{host}/{path}"
-    
     """Returnează o adresă completă, de exemplu https://example.com/login."""
-    pass
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"https://{host}{path}"
 
 
 def is_https(url):
     """Returnează True dacă adresa începe cu https://, altfel False."""
-    pass
+    return url.startswith("https://")
 
 
 def show_response(url):
     """Trimite un GET la url și afișează statusul și Content-Type."""
-    pass
+    try:
+        response = requests.get(url, timeout=5)
+        print(f"Status: {response.status_code}")
+        print(f"Content-Type: {response.headers.get('Content-Type', 'unknown')}")
+    except requests.RequestException as e:
+        print(f"Erore la cerere: {e}")
 
 
 def check_site(url):
     """Returnează un dicționar cu: status, content_type, length, server."""
-    pass
+    try:
+        response = requests.get(url, timeout=5)
+        
+        # Extragem tipul conținutului fără parametrii suplimentari (ex. charset)
+        content_type = response.headers.get("Content-Type", "unknown").split(";")[0].strip()
+        server = response.headers.get("Server", "unknown")
+        
+        return {
+            "status": response.status_code,
+            "content_type": content_type,
+            "length": len(response.content),
+            "server": server
+        }
+    except requests.RequestException:
+        return {"status": None, "error": "Cererea a eșuat sau a expirat"}
 
 
 def scan_sites():
     """Verifică toate site-urile din SITES, afișează-le pe cele care merg și un rezumat."""
-    pass
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    for url in SITES:
+        res = check_site(url)
+        # Salvăm rezultatul împreună cu URL-ul
+        results.append((url, res))
+        
+        if res.get("status") == 200:
+            success_count += 1
+        else:
+            fail_count += 1
+
+    # Filtrăm doar site-urile care au returnat statusul 200
+    successful_sites = [item for item in results if item[1].get("status") == 200]
+    
+    # Sortăm descrescător după length
+    successful_sites.sort(key=lambda x: x[1].get("length", 0), reverse=True)
+
+    # Afișăm rezultatele conforme cu exemplul
+    for url, res in successful_sites:
+        print(f"{url} -> 200, {res['length']} octeți")
+
+    print(f"Reuşite: {success_count} Eşuate: {fail_count}")
 
 
 def check_headers(url):
     """Returnează un dicționar cu: present, missing, score."""
-    pass
+    try:
+        response = requests.get(url, timeout=5)
+    except requests.RequestException:
+        return {"status": None, "error": "Site inaccesibil"}
+
+    # Creăm un dicționar cu anteturile primite care ignoră majusculele/minusculele
+    headers_lower = {k.lower(): v for k, v in response.headers.items()}
+
+    present = []
+    missing = []
+
+    for header in SECURITY_HEADERS:
+        if header.lower() in headers_lower:
+            present.append(header)
+        else:
+            missing.append(header)
+
+    score = int((len(present) / len(SECURITY_HEADERS)) * 100)
+
+    return {
+        "present": present,
+        "missing": missing,
+        "score": score,
+    }
 
 
 def retry_check(url, attempts=3):
     """Încearcă de cel mult `attempts` ori; returnează un dicționar cu: status, attempts."""
-    pass
+    current_attempts = 0
+    last_status = None
+    last_error = None
+
+    while current_attempts < attempts:
+        current_attempts += 1
+        try:
+            response = requests.get(url, timeout=5)
+            last_status = response.status_code
+
+            # Dacă serverul răspunde cu un status sub 500 (inclusiv 404), ne oprim imediat
+            if last_status < 500:
+                return {
+                    "status": last_status,
+                    "attempts": current_attempts
+                }
+            
+            # Dacă e 500 sau mai mare, va mai încerca (dacă mai are încercări)
+        except requests.RequestException as e:
+            last_status = None
+            last_error = "Erore de conexiune"
+
+    result = {
+        "status": last_status,
+        "attempts": current_attempts
+    }
+    if last_error:
+        result["error"] = last_error
+
+    return result
